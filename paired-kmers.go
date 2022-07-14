@@ -361,20 +361,21 @@ func searchPairedKmers(para Para) {
 	fmt.Fprintf(os.Stderr, "build kmer info done.\n")
 
 	if len(para.Out) == 0 {
-		para.Out = fmt.Sprintf("%s.%d.%d.%d.paired_kmers.bed", para.Input, para.Kvalue, para.MinSize, para.MaxSize)
+		para.Out = fmt.Sprintf("%s.paired_kmers.bed", para.Input)
 	}
 
 	fo, err := os.Create(para.Out)
 	checkErr(err)
 	defer fo.Close()
 
-	fmt.Fprintf(fo, "# %s", strings.Join(os.Args, " "))
+	fmt.Fprintf(fo, "# %s\n", strings.Join(os.Args, " "))
+	fmt.Fprintln(fo, "# inner position")
 
 	startTime := time.Now()
 
 	roadList := findPairRoads(kiList, fastaHash, para)
 	for _, road := range roadList {
-		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\n", road.Name, road.F3, road.R3, road.Records.Cardinality(), float64(road.Records.Cardinality())/float64(allRecordsSize)*100)
+		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\t%s\n", road.Name, road.F3, road.R3, road.Records.Cardinality(), float64(road.Records.Cardinality())/float64(allRecordsSize)*100, strings.Join(road.Records.ToSlice(), " "))
 	}
 
 	log.Printf("Total time used: %s", time.Since(startTime).String())
