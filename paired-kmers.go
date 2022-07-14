@@ -293,41 +293,6 @@ func (a *KmerInfo) Empty() bool {
 
 type KmerInfoList []KmerInfo
 
-func searchPairedKmers(para Para) {
-	logFh, err := os.OpenFile(para.Input+".paired_kmers.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	checkErr(err)
-	defer logFh.Close()
-
-	log.SetOutput(logFh)
-
-	log.Println("create log file done")
-
-	log.Println("Cmd: ", strings.Join(os.Args, " "))
-
-	kiList, allRecords, fastaHash := buildKmerInfo(para.Input, int(para.Kvalue))
-
-	allRecordsSize := allRecords.Cardinality()
-
-	fmt.Fprintf(os.Stderr, "build kmer info done.\n")
-
-	if len(para.Out) == 0 {
-		para.Out = fmt.Sprintf("%s.%d.%d.%d.paired_kmers.bed", para.Input, para.Kvalue, para.MinSize, para.MaxSize)
-	}
-
-	fo, err := os.Create(para.Out)
-	checkErr(err)
-	defer fo.Close()
-
-	startTime := time.Now()
-
-	roadList := findPairRoads(kiList, fastaHash, para)
-	for _, road := range roadList {
-		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\n", road.Name, road.F3, road.R3, road.Records.Cardinality(), float64(road.Records.Cardinality())/float64(allRecordsSize)*100)
-	}
-
-	log.Printf("Total time used: %s", time.Since(startTime).String())
-}
-
 type Para struct {
 	Out     string
 	Input   string
@@ -375,4 +340,42 @@ func main() {
 	}
 
 	searchPairedKmers(p)
+}
+
+// work flow
+func searchPairedKmers(para Para) {
+	logFh, err := os.OpenFile(para.Input+".paired_kmers.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	checkErr(err)
+	defer logFh.Close()
+
+	log.SetOutput(logFh)
+
+	log.Println("create log file done")
+
+	log.Println("Cmd: ", strings.Join(os.Args, " "))
+
+	kiList, allRecords, fastaHash := buildKmerInfo(para.Input, int(para.Kvalue))
+
+	allRecordsSize := allRecords.Cardinality()
+
+	fmt.Fprintf(os.Stderr, "build kmer info done.\n")
+
+	if len(para.Out) == 0 {
+		para.Out = fmt.Sprintf("%s.%d.%d.%d.paired_kmers.bed", para.Input, para.Kvalue, para.MinSize, para.MaxSize)
+	}
+
+	fo, err := os.Create(para.Out)
+	checkErr(err)
+	defer fo.Close()
+
+	fmt.Fprintf(fo, "# %s", strings.Join(os.Args, " "))
+
+	startTime := time.Now()
+
+	roadList := findPairRoads(kiList, fastaHash, para)
+	for _, road := range roadList {
+		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\n", road.Name, road.F3, road.R3, road.Records.Cardinality(), float64(road.Records.Cardinality())/float64(allRecordsSize)*100)
+	}
+
+	log.Printf("Total time used: %s", time.Since(startTime).String())
 }
