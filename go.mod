@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/deckarep/golang-set/v2 v2.1.0
+	github.com/neilotoole/errgroup v0.1.6
 	github.com/shenwei356/bio v0.7.1
 	github.com/spf13/pflag v1.0.5
 )

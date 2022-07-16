@@ -5,7 +5,9 @@ Copyright © 2019 Wubin Qu <quwubin@gmail.com>
 */
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/neilotoole/errgroup"
 	"github.com/shenwei356/bio/seq"
 	"github.com/shenwei356/bio/seqio/fastx"
 	flag "github.com/spf13/pflag"
@@ -53,47 +56,103 @@ func JaccardContainment2(a, b mapset.Set[string]) int {
 	return a.Intersect(b).Cardinality()
 }
 
-// kmer module
+type outData struct {
+	Kmers  mapset.Set[string]
+	Record *fastx.Record
+}
 
-func buildKmerInfo(db string, kvalue int) (KmerInfoList, mapset.Set[string], map[string]*fastx.Record) {
+// kmer module
+func buildKmerInfo(db string, kvalue int, cpu int) (KmerInfoList, mapset.Set[string], map[string]*fastx.Record) {
+
+	g, ctx := errgroup.WithContext(context.Background())
+	inChan := make(chan *fastx.Record)
+
+	g.Go(
+		func() error {
+			defer close(inChan)
+
+			reader, err := fastx.NewDefaultReader(db)
+			if err != nil {
+				return err
+			}
+
+			var record *fastx.Record
+			for {
+				record, err = reader.Read()
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+					log.Println(err)
+					break
+				}
+
+				select {
+				case inChan <- record.Clone():
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+
+			return nil
+		},
+	)
+
+	outChan := make(chan outData)
+
+	for i := 0; i < cpu; i++ {
+		g.Go(
+			func() error {
+				for t := range inChan {
+					t := t
+
+					seq := bytes.ToUpper(t.Seq.Seq)
+					t.Seq.Seq = seq
+
+					kmers := BuildKmerSet(string(seq), kvalue)
+
+					select {
+					case outChan <- outData{Kmers: kmers, Record: t}:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+
+				return nil
+			},
+		)
+	}
+
+	go func() {
+		g.Wait()
+		close(outChan)
+	}()
+
 	kmerInfo := make(map[string]mapset.Set[string])
 	allRecords := mapset.NewSet[string]()
 	fastaHash := make(map[string]*fastx.Record)
 
-	reader, err := fastx.NewDefaultReader(db)
-	checkErr(err)
-	var record *fastx.Record
-	for {
-		record, err = reader.Read()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			checkErr(err)
-			break
-		}
-
-		allRecords.Add(string(record.ID))
-
-		seq := bytes.ToUpper(record.Seq.Seq)
-
-		record.Seq.Seq = seq
-
-		fastaHash[string(record.ID)] = record
-
-		kmers := BuildKmerSet(string(seq), kvalue)
-
-		for k := range kmers.Iterator().C {
+	for o := range outChan {
+		for k := range o.Kmers.Iter() {
 			_, ok := kmerInfo[k]
 			if !ok {
 				kmerInfo[k] = mapset.NewSet[string]()
 			}
 
-			kmerInfo[k].Add(string(record.ID))
+			kmerInfo[k].Add(string(o.Record.ID))
 		}
+
+		allRecords.Add(string(o.Record.ID))
+		fastaHash[string(o.Record.ID)] = o.Record
 	}
 
 	kiList := make(KmerInfoList, len(kmerInfo))
+
+	if err := g.Wait(); err != nil {
+		log.Println(err)
+		return kiList, allRecords, fastaHash
+	}
+
 	i := 0
 	for k, v := range kmerInfo {
 		kiList[i] = KmerInfo{K: k, RecordSet: v}
@@ -110,7 +169,7 @@ func fincCandiRoads(fastaHash map[string]*fastx.Record, k1 KmerInfo, k2 KmerInfo
 	re2 := regexp.MustCompile(k2.K)
 	var candi PairedKmer
 	sharedRecords := mapset.NewSet[string]()
-	for recordName := range k1.RecordSet.Iterator().C {
+	for recordName := range k1.RecordSet.Iter() {
 		if !k2.RecordSet.Contains(recordName) {
 			continue
 		}
@@ -215,26 +274,79 @@ func (a *PairedKmer) Empty() bool {
 
 type PairedKmers []PairedKmer
 
+type kiData struct {
+	K1 KmerInfo
+	KI KmerInfoList
+}
+
 func findPairRoads(kiList KmerInfoList, fastaHash map[string]*fastx.Record, para Para) PairedKmers {
+	g, ctx := errgroup.WithContext(context.Background())
+	inChan := make(chan kiData)
 	var roadList PairedKmers
-	for i := 0; i < len(kiList); i++ {
-		if i == len(kiList)-1 {
-			break
-		}
 
-		k1 := kiList[i]
+	g.Go(
+		func() error {
+			defer close(inChan)
 
-		k2 := findMaxContainment(k1, kiList, i+1)
-		if k2.Empty() {
-			continue
-		}
+			for i := 0; i < len(kiList); i++ {
+				if i == len(kiList)-1 {
+					break
+				}
 
-		candi := fincCandiRoads(fastaHash, k1, k2, para)
-		if candi.Empty() {
-			continue
-		}
+				k1 := kiList[i]
 
+				select {
+				case inChan <- kiData{K1: k1, KI: kiList[i+1:]}:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+
+			return nil
+		},
+	)
+
+	outChan := make(chan PairedKmer)
+
+	for i := 0; i < para.CPU; i++ {
+		g.Go(
+			func() error {
+				for t := range inChan {
+					t := t
+
+					k2 := findMaxContainment(t.K1, t.KI)
+					if k2.Empty() {
+						continue
+					}
+
+					candi := fincCandiRoads(fastaHash, t.K1, k2, para)
+					if candi.Empty() {
+						continue
+					}
+
+					select {
+					case outChan <- candi:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+
+				return nil
+			},
+		)
+	}
+
+	go func() {
+		g.Wait()
+		close(outChan)
+	}()
+
+	for candi := range outChan {
 		roadList = append(roadList, candi)
+	}
+
+	if err := g.Wait(); err != nil {
+		log.Println(err)
 	}
 
 	sort.Slice(roadList, func(i, j int) bool { return roadList[i].Records.Cardinality() > roadList[j].Records.Cardinality() })
@@ -242,21 +354,21 @@ func findPairRoads(kiList KmerInfoList, fastaHash map[string]*fastx.Record, para
 	return roadList
 }
 
-func findMaxContainment(k1 KmerInfo, kiList KmerInfoList, j int) KmerInfo {
+func findMaxContainment(k1 KmerInfo, kiList KmerInfoList) KmerInfo {
 	maxJC := 0
 	var maxK2 KmerInfo
 	if k1.RecordSet.Cardinality() == 0 {
 		return maxK2
 	}
 
-	if len(kiList[j:]) == 0 {
+	if len(kiList) == 0 {
 		return maxK2
 	}
 
 	// fmt.Fprintf(os.Stderr, "begin findMaxContainment, left size: %d\n", len(kiList))
 
 	// kiList sorted already
-	for _, k2 := range kiList[j:] {
+	for _, k2 := range kiList {
 		if k2.RecordSet.Cardinality() == 0 {
 			break
 		}
@@ -300,6 +412,7 @@ type Para struct {
 	Number  int
 	MinSize int
 	MaxSize int
+	CPU     int
 }
 
 func main() {
@@ -309,6 +422,7 @@ func main() {
 	var number *int = flag.IntP("number", "n", 100, "total n paired-kmers will be print out")
 	var minSize *int = flag.IntP("minSize", "s", 60, "min size of two paired-kmers")
 	var maxSize *int = flag.IntP("maxSize", "S", 130, "max size of two paired-kmers")
+	var cpu *int = flag.IntP("cpu", "c", 64, "CPU number")
 	var help *bool = flag.BoolP("help", "h", false, "help")
 
 	flag.Usage = func() {
@@ -337,9 +451,42 @@ func main() {
 		Number:  *number,
 		MinSize: *minSize,
 		MaxSize: *maxSize,
+		CPU:     *cpu,
 	}
 
 	searchPairedKmers(p)
+}
+
+func outExists(out string) bool {
+	if _, err := os.Stat(out); os.IsNotExist(err) {
+		return false
+	}
+
+	fh, err := os.Open(out)
+	if err != nil {
+		log.Println(err)
+		return false
+	}
+	defer fh.Close()
+
+	scanner := bufio.NewScanner(fh)
+
+	count := 0
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if len(line) == 0 || line[0] == '#' {
+			continue
+		}
+
+		count++
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Println(err)
+		return false
+	}
+
+	return count > 0
 }
 
 // work flow
@@ -354,15 +501,22 @@ func searchPairedKmers(para Para) {
 
 	log.Println("Cmd: ", strings.Join(os.Args, " "))
 
-	kiList, allRecords, fastaHash := buildKmerInfo(para.Input, int(para.Kvalue))
+	if len(para.Out) == 0 {
+		para.Out = fmt.Sprintf("%s.paired_kmers.bed", para.Input)
+	}
+
+	if outExists(para.Out) {
+		log.Printf("%s file exists and return", para.Out)
+		return
+	}
+
+	kiList, allRecords, fastaHash := buildKmerInfo(para.Input, int(para.Kvalue), para.CPU)
+
+	log.Println("build kmer info done.")
 
 	allRecordsSize := allRecords.Cardinality()
 
 	fmt.Fprintf(os.Stderr, "build kmer info done.\n")
-
-	if len(para.Out) == 0 {
-		para.Out = fmt.Sprintf("%s.paired_kmers.bed", para.Input)
-	}
 
 	fo, err := os.Create(para.Out)
 	checkErr(err)
