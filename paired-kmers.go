@@ -19,6 +19,8 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/neilotoole/errgroup"
+	"github.com/quwubin/bio/fasta"
+	"github.com/quwubin/bio/primer"
 	"github.com/shenwei356/bio/seq"
 	"github.com/shenwei356/bio/seqio/fastx"
 	flag "github.com/spf13/pflag"
@@ -32,7 +34,7 @@ func checkErr(err error) {
 }
 
 // kmer module
-func BuildKmerSet(seq string, k int) mapset.Set[string] {
+func BuildKmerSet(seq string, k int, p Para) mapset.Set[string] {
 	kmers := mapset.NewSet[string]()
 	nKmers := len(seq) - k + 1
 
@@ -42,6 +44,15 @@ func BuildKmerSet(seq string, k int) mapset.Set[string] {
 
 	for i := 0; i < nKmers; i++ {
 		kmer := seq[i : i+k]
+		maxRun := primer.CharMaxRuns(kmer)
+		if maxRun > p.MaxRun {
+			continue
+		}
+
+		gc := fasta.CalGC(kmer)
+		if gc < p.MinGC || gc > p.MaxGC {
+			continue
+		}
 		kmers.Add(kmer)
 	}
 
@@ -62,7 +73,7 @@ type outData struct {
 }
 
 // kmer module
-func buildKmerInfo(db string, kvalue int, cpu int) (KmerInfoList, mapset.Set[string], map[string]*fastx.Record) {
+func buildKmerInfo(db string, kvalue int, cpu int, p Para) (KmerInfoList, mapset.Set[string], map[string]*fastx.Record) {
 
 	g, ctx := errgroup.WithContext(context.Background())
 	inChan := make(chan *fastx.Record)
@@ -109,7 +120,7 @@ func buildKmerInfo(db string, kvalue int, cpu int) (KmerInfoList, mapset.Set[str
 					seq := bytes.ToUpper(t.Seq.Seq)
 					t.Seq.Seq = seq
 
-					kmers := BuildKmerSet(string(seq), kvalue)
+					kmers := BuildKmerSet(string(seq), kvalue, p)
 
 					select {
 					case outChan <- outData{Kmers: kmers, Record: t}:
@@ -133,7 +144,7 @@ func buildKmerInfo(db string, kvalue int, cpu int) (KmerInfoList, mapset.Set[str
 	fastaHash := make(map[string]*fastx.Record)
 
 	for o := range outChan {
-		for k := range o.Kmers.Iter() {
+		for k := range o.Kmers.Iterator().C {
 			_, ok := kmerInfo[k]
 			if !ok {
 				kmerInfo[k] = mapset.NewSet[string]()
@@ -164,12 +175,70 @@ func buildKmerInfo(db string, kvalue int, cpu int) (KmerInfoList, mapset.Set[str
 	return kiList, allRecords, fastaHash
 }
 
+// kmer module
+func buildKmerInfoBasic(db string, kvalue int, cpu int, p Para) (KmerInfoList, mapset.Set[string], map[string]*fastx.Record) {
+
+	kmerInfo := make(map[string]mapset.Set[string])
+	allRecords := mapset.NewSet[string]()
+	fastaHash := make(map[string]*fastx.Record)
+
+	reader, err := fastx.NewDefaultReader(db)
+	checkErr(err)
+
+	var record *fastx.Record
+	var kmers mapset.Set[string]
+	for {
+		record, err = reader.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Println(err)
+			break
+		}
+
+		seq := bytes.ToUpper(record.Seq.Seq)
+		record.Seq.Seq = seq
+
+		if len(seq) <= kvalue {
+			log.Printf("small size record: %s, size: %d, kvalue: %d", record.ID, len(seq), kvalue)
+			continue
+		}
+
+		kmers = BuildKmerSet(string(seq), kvalue, p)
+
+		for k := range kmers.Iter() {
+			_, ok := kmerInfo[k]
+			if !ok {
+				kmerInfo[k] = mapset.NewSet[string]()
+			}
+
+			kmerInfo[k].Add(string(record.ID))
+		}
+
+		allRecords.Add(string(record.ID))
+		fastaHash[string(record.ID)] = record
+	}
+
+	kiList := make(KmerInfoList, len(kmerInfo))
+
+	i := 0
+	for k, v := range kmerInfo {
+		kiList[i] = KmerInfo{K: k, RecordSet: v}
+		i++
+	}
+
+	sort.Slice(kiList, func(i, j int) bool { return kiList[i].RecordSet.Cardinality() > kiList[j].RecordSet.Cardinality() })
+
+	return kiList, allRecords, fastaHash
+}
+
 func fincCandiRoads(fastaHash map[string]*fastx.Record, k1 KmerInfo, k2 KmerInfo, para Para) PairedKmer {
 	re1 := regexp.MustCompile(k1.K)
 	re2 := regexp.MustCompile(k2.K)
 	var candi PairedKmer
 	sharedRecords := mapset.NewSet[string]()
-	for recordName := range k1.RecordSet.Iter() {
+	for recordName := range k1.RecordSet.Iterator().C {
 		if !k2.RecordSet.Contains(recordName) {
 			continue
 		}
@@ -413,16 +482,24 @@ type Para struct {
 	MinSize int
 	MaxSize int
 	CPU     int
+	MaxRun  int
+	MinGC   float64
+	MaxGC   float64
+	Force   bool
 }
 
 func main() {
 	var input *string = flag.StringP("in", "i", "", "[*] input virus/bacterial file in fasta format")
 	var out *string = flag.StringP("out", "o", "", "output file")
 	var kvalue *int = flag.IntP("kvalue", "k", 21, "k value")
-	var number *int = flag.IntP("number", "n", 100, "total n paired-kmers will be print out")
+	var number *int = flag.IntP("number", "n", 2000, "the first n kmers (sorted by hit records) for next analysis")
 	var minSize *int = flag.IntP("minSize", "s", 60, "min size of two paired-kmers")
 	var maxSize *int = flag.IntP("maxSize", "S", 130, "max size of two paired-kmers")
 	var cpu *int = flag.IntP("cpu", "c", 64, "CPU number")
+	var maxRun *int = flag.Int("maxRun", 6, "max run")
+	var minGC *float64 = flag.Float64P("minGC", "g", 25.0, "max gc")
+	var maxGC *float64 = flag.Float64P("maxGC", "G", 75.0, "min gc")
+	var force *bool = flag.BoolP("force", "f", false, "force to index")
 	var help *bool = flag.BoolP("help", "h", false, "help")
 
 	flag.Usage = func() {
@@ -452,6 +529,10 @@ func main() {
 		MinSize: *minSize,
 		MaxSize: *maxSize,
 		CPU:     *cpu,
+		MaxRun:  *maxRun,
+		MinGC:   *minGC,
+		MaxGC:   *maxGC,
+		Force:   *force,
 	}
 
 	searchPairedKmers(p)
@@ -505,12 +586,21 @@ func searchPairedKmers(para Para) {
 		para.Out = fmt.Sprintf("%s.paired_kmers.bed", para.Input)
 	}
 
-	if outExists(para.Out) {
-		log.Printf("%s file exists and return", para.Out)
-		return
+	if !para.Force {
+		if outExists(para.Out) {
+			log.Printf("%s file exists and return", para.Out)
+			return
+		}
 	}
 
-	kiList, allRecords, fastaHash := buildKmerInfo(para.Input, int(para.Kvalue), para.CPU)
+	kiList, allRecords, fastaHash := buildKmerInfo(para.Input, int(para.Kvalue), para.CPU, para)
+
+	// 抽样，否则太多了: 理论基础：保守区域应该是排在前列的；潜在问题，可能不够用。
+	if para.Number != -1 {
+		if len(kiList) > para.Number {
+			kiList = kiList[:para.Number]
+		}
+	}
 
 	log.Println("build kmer info done.")
 
