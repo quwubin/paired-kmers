@@ -251,6 +251,17 @@ func buildKmerInfo(db string, kvalue int, cpu int, p Para) (KmerInfoList, *roari
 
 		if first {
 			if len(batch) >= p.KmerSample {
+				if p.Test {
+					// batch1 := clone.Slowly(batch).([]recordOutData)
+					// batch2 := clone.Slowly(batch).([]recordOutData)
+					unionKmers := reduceKmerByBatch(batch, false)
+					unionCount := unionKmers.GetCardinality()
+					interKmers := reduceKmerByBatch(batch, true)
+					interCount := interKmers.GetCardinality()
+
+					log.Printf("union kmers: %d, intersection kmers: %d, reduced %d for the first %d records", unionCount, interCount, unionCount-interCount, p.KmerSample)
+					os.Exit(0)
+				}
 
 				expKmers = reduceKmerByBatch(batch, p.Intersect)
 				if p.Intersect {
@@ -641,6 +652,7 @@ type Para struct {
 	Force      bool
 	KmerSample int // kmer sample from the first n records
 	Intersect  bool
+	Test       bool
 }
 
 func outExists(out string) bool {
@@ -745,6 +757,7 @@ func main() {
 	var minGC *float64 = flag.Float64P("minGC", "g", 25.0, "max gc")
 	var maxGC *float64 = flag.Float64P("maxGC", "G", 75.0, "min gc")
 	var force *bool = flag.BoolP("force", "f", false, "force to index")
+	var test *bool = flag.BoolP("test", "t", false, "test")
 	var help *bool = flag.BoolP("help", "h", false, "help")
 
 	flag.Usage = func() {
@@ -780,6 +793,7 @@ func main() {
 		MinGC:      *minGC,
 		MaxGC:      *maxGC,
 		Force:      *force,
+		Test:       *test,
 	}
 
 	searchPairedKmers(p)
