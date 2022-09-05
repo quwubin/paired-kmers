@@ -399,6 +399,10 @@ func fincCandiRoads(fastaHash map[uint64]*fastx.Record, k1 KmerInfo, k2 KmerInfo
 	re2 := regexp.MustCompile(k2seq)
 	var candi PairedKmer
 
+	if k1.RecordSet == nil || k2.RecordSet == nil {
+		return candi
+	}
+
 	k1.RecordSet.And(k2.RecordSet)
 
 	sharedRecords := roaring64.New()
@@ -590,7 +594,7 @@ func findPairRoads(kiList KmerInfoList, fastaHash map[uint64]*fastx.Record, para
 func findMaxContainment(k1 KmerInfo, kiList KmerInfoList) KmerInfo {
 	maxJC := uint64(0)
 	var maxK2 KmerInfo
-	if k1.RecordSet.GetCardinality() == 0 {
+	if k1.RecordSet == nil || k1.RecordSet.GetCardinality() == 0 {
 		return maxK2
 	}
 
