@@ -143,6 +143,10 @@ func buildKmer(seq []byte, k int, p Para) *roaring64.Bitmap {
 }
 
 func JaccardContainment(a, b *roaring64.Bitmap) uint64 {
+	if a == nil || b == nil {
+		return 0
+	}
+
 	return a.AndCardinality(b)
 }
 
@@ -239,7 +243,7 @@ func buildKmerInfo(db string, kvalue int, cpu int, p Para) (KmerInfoList, *roari
 	expKmers := roaring64.New()
 	first := true
 
-	if p.KmerSample < 0 {
+	if p.RecordsSample < 0 {
 		first = false
 	}
 
@@ -250,7 +254,7 @@ func buildKmerInfo(db string, kvalue int, cpu int, p Para) (KmerInfoList, *roari
 		// fmt.Printf("first: %t, batch: %d, expKmers: %d\n", first, len(batch), expKmers.GetCardinality())
 
 		if first {
-			if len(batch) >= p.KmerSample {
+			if len(batch) >= p.RecordsSample {
 				if p.Test {
 					// batch1 := clone.Slowly(batch).([]recordOutData)
 					// batch2 := clone.Slowly(batch).([]recordOutData)
@@ -259,7 +263,7 @@ func buildKmerInfo(db string, kvalue int, cpu int, p Para) (KmerInfoList, *roari
 					interKmers := reduceKmerByBatch(batch, true)
 					interCount := interKmers.GetCardinality()
 
-					log.Printf("union kmers: %d, intersection kmers: %d, reduced %d for the first %d records", unionCount, interCount, unionCount-interCount, p.KmerSample)
+					log.Printf("union kmers: %d, intersection kmers: %d, reduced %d for the first %d records", unionCount, interCount, unionCount-interCount, p.RecordsSample)
 					os.Exit(0)
 				}
 
@@ -373,6 +377,10 @@ func reduceKmerByBatch(list []recordOutData, intersect bool) *roaring64.Bitmap {
 		return reducedKmer
 	}
 
+	if &list[0].KmerSet == nil {
+		return reducedKmer
+	}
+
 	reducedKmer.Or(&list[0].KmerSet)
 
 	if len(list) == 1 {
@@ -380,6 +388,10 @@ func reduceKmerByBatch(list []recordOutData, intersect bool) *roaring64.Bitmap {
 	}
 
 	for _, l := range list[1:] {
+		if &l.KmerSet == nil {
+			continue
+		}
+
 		if intersect {
 			reducedKmer.And(&l.KmerSet)
 		} else {
@@ -594,7 +606,7 @@ func findPairRoads(kiList KmerInfoList, fastaHash map[uint64]*fastx.Record, para
 func findMaxContainment(k1 KmerInfo, kiList KmerInfoList) KmerInfo {
 	maxJC := uint64(0)
 	var maxK2 KmerInfo
-	if k1.RecordSet == nil || k1.RecordSet.GetCardinality() == 0 {
+	if k1.RecordSet == nil || k1.RecordSet.IsEmpty() {
 		return maxK2
 	}
 
@@ -606,7 +618,15 @@ func findMaxContainment(k1 KmerInfo, kiList KmerInfoList) KmerInfo {
 
 	// kiList sorted already
 	for _, k2 := range kiList {
-		if k2.RecordSet.GetCardinality() == 0 {
+		if k2.RecordSet == nil {
+			break
+		}
+
+		if k2.RecordSet.IsEmpty() {
+			break
+		}
+
+		if k2.Empty() {
 			break
 		}
 
@@ -643,20 +663,20 @@ func (a *KmerInfo) Empty() bool {
 type KmerInfoList []KmerInfo
 
 type Para struct {
-	Out        string
-	Input      string
-	Kvalue     int
-	KmerEval   int
-	MinSize    int
-	MaxSize    int
-	CPU        int
-	MaxRun     int
-	MinGC      float64
-	MaxGC      float64
-	Force      bool
-	KmerSample int // kmer sample from the first n records
-	Intersect  bool
-	Test       bool
+	Out           string
+	Input         string
+	Kvalue        int
+	KmerEval      int
+	MinSize       int
+	MaxSize       int
+	CPU           int
+	MaxRun        int
+	MinGC         float64
+	MaxGC         float64
+	Force         bool
+	RecordsSample int // kmer sample from the first n records
+	Intersect     bool
+	Test          bool
 }
 
 func outExists(out string) bool {
@@ -693,17 +713,17 @@ func outExists(out string) bool {
 
 // work flow
 func searchPairedKmers(para Para) {
+	startTime := time.Now()
+
 	logFh, err := os.OpenFile(para.Input+".paired_kmers.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	checkErr(err)
 	defer logFh.Close()
 
 	log.SetOutput(logFh)
 
-	log.Println("create log file done")
-
 	log.Println("Cmd: ", strings.Join(os.Args, " "))
 
-	log.Printf("records sample: sample count: %d, union: %t", para.KmerSample, !para.Intersect)
+	log.Printf("records sample: sample count: %d, union: %t", para.RecordsSample, !para.Intersect)
 
 	if len(para.Out) == 0 {
 		para.Out = fmt.Sprintf("%s.paired_kmers.bed", para.Input)
@@ -737,8 +757,6 @@ func searchPairedKmers(para Para) {
 	fmt.Fprintf(fo, "# %s\n", strings.Join(os.Args, " "))
 	fmt.Fprintln(fo, "# inner position")
 
-	startTime := time.Now()
-
 	roadList := findPairRoads(kiList, fastaHash, para)
 	for _, road := range roadList {
 		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\n", fastaHash[road.Index].ID, road.F3, road.R3, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(allRecordsSize)*100)
@@ -750,24 +768,24 @@ func searchPairedKmers(para Para) {
 func main() {
 	var input *string = flag.StringP("in", "i", "", "[*] input virus/bacterial file in fasta format")
 	var out *string = flag.StringP("out", "o", "", "output file")
-	var kvalue *int = flag.IntP("kvalue", "k", 21, "k value")
-	var kmerSample *int = flag.Int("kmerSample", 10, "kmer sample from the first n records, set -1 for all records")
+	var kvalue *int = flag.IntP("kvalue", "k", 17, "k value")
+	var recordsSample *int = flag.Int("recordsSample", 10, "kmer sample from the first n records, set -1 for all records")
 	var intersect *bool = flag.Bool("intersect", false, "intersect (not union) the kmers of the first n records")
 	var kmerEval *int = flag.IntP("kmerEval", "n", 2000, "the first n kmers (sorted by hit records) for next evaluation; set -1 for all kmers")
-	var minSize *int = flag.IntP("minSize", "s", 60, "min size of two paired-kmers")
-	var maxSize *int = flag.IntP("maxSize", "S", 130, "max size of two paired-kmers")
-	var cpu *int = flag.IntP("cpu", "c", 64, "CPU number")
-	var maxRun *int = flag.Int("maxRun", 5, "max run")
-	var minGC *float64 = flag.Float64P("minGC", "g", 25.0, "max gc")
-	var maxGC *float64 = flag.Float64P("maxGC", "G", 75.0, "min gc")
-	var force *bool = flag.BoolP("force", "f", false, "force to index")
-	var test *bool = flag.BoolP("test", "t", false, "test")
-	var help *bool = flag.BoolP("help", "h", false, "help")
+	var minSize *int = flag.IntP("minSize", "s", 60, "min distance between the two paired-kmers")
+	var maxSize *int = flag.IntP("maxSize", "S", 130, "max distance between the two paired-kmers")
+	var cpu *int = flag.IntP("cpu", "c", 64, "CPU number to use")
+	var maxRun *int = flag.Int("maxRun", 5, "runs are repeated nucleotides (e.g. TAAAAAGC has a 5 bp run of Adenine)")
+	var minGC *float64 = flag.Float64P("minGC", "g", 25.0, "max gc allowed for each kmer")
+	var maxGC *float64 = flag.Float64P("maxGC", "G", 75.0, "min gc allowed for each kmer")
+	var force *bool = flag.BoolP("force", "f", false, "force to override exists output files")
+	var test *bool = flag.BoolP("test", "t", false, "test model")
+	var help *bool = flag.BoolP("help", "h", false, "print this message")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n\n", os.Args[0])
 
-		fmt.Fprintln(os.Stderr, "./paired-kmer -i sars2.fa -o sars2.paired-kmer.txt -n 20 -s 90 -S 200")
+		fmt.Fprintln(os.Stderr, "./paired-kmer -i sars2.fa -o sars2.paired-kmer.bed -k 17 -s 60 -S 130")
 
 		fmt.Fprintln(os.Stderr)
 
@@ -784,20 +802,20 @@ func main() {
 	}
 
 	p := Para{
-		Input:      *input,
-		Out:        *out,
-		Kvalue:     *kvalue,
-		KmerSample: *kmerSample,
-		Intersect:  *intersect,
-		KmerEval:   *kmerEval,
-		MinSize:    *minSize,
-		MaxSize:    *maxSize,
-		CPU:        *cpu,
-		MaxRun:     *maxRun,
-		MinGC:      *minGC,
-		MaxGC:      *maxGC,
-		Force:      *force,
-		Test:       *test,
+		Input:         *input,
+		Out:           *out,
+		Kvalue:        *kvalue,
+		RecordsSample: *recordsSample,
+		Intersect:     *intersect,
+		KmerEval:      *kmerEval,
+		MinSize:       *minSize,
+		MaxSize:       *maxSize,
+		CPU:           *cpu,
+		MaxRun:        *maxRun,
+		MinGC:         *minGC,
+		MaxGC:         *maxGC,
+		Force:         *force,
+		Test:          *test,
 	}
 
 	searchPairedKmers(p)
