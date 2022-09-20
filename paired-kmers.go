@@ -754,12 +754,18 @@ func searchPairedKmers(para Para) {
 	checkErr(err)
 	defer fo.Close()
 
+	fmid, err := os.Create(para.Out + ".mid.bed")
+	checkErr(err)
+	defer fmid.Close()
+
 	fmt.Fprintf(fo, "# %s\n", strings.Join(os.Args, " "))
 	fmt.Fprintln(fo, "# inner position")
 
 	roadList := findPairRoads(kiList, fastaHash, para)
 	for _, road := range roadList {
 		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\n", fastaHash[road.Index].ID, road.F3, road.R3, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(allRecordsSize)*100)
+		mid := int((road.F3 + road.R3) / 2)
+		fmt.Fprintf(fmid, "%s\t%d\t%d\t%d\t%.2f\n", fastaHash[road.Index].ID, mid, mid+1, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(allRecordsSize)*100)
 	}
 
 	log.Printf("Total time used: %s", time.Since(startTime).String())
