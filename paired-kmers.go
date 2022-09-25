@@ -763,7 +763,8 @@ func searchPairedKmers(para Para) {
 
 	roadList := findPairRoads(kiList, fastaHash, para)
 	for _, road := range roadList {
-		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\n", fastaHash[road.Index].ID, road.F3, road.R3, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(allRecordsSize)*100)
+		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\t%s\t%s\n", fastaHash[road.Index].ID, road.F3, road.R3, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(allRecordsSize)*100, road.K1, road.K2)
+
 		mid := int((road.F3 + road.R3) / 2)
 		fmt.Fprintf(fmid, "%s\t%d\t%d\t%d\t%.2f\n", fastaHash[road.Index].ID, mid, mid+1, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(allRecordsSize)*100)
 	}
