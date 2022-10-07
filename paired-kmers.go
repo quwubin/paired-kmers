@@ -486,7 +486,7 @@ func findPairRoads(kiList KmerInfoList, fastaHash map[uint32]*fastx.Record, para
 						continue
 					}
 
-					candi := fincCandiRoads(fastaHash, t.K1.Clone(), k2, para, offset)
+					candi := fincCandiRoads(fastaHash, t.K1.Clone(), k2.Clone(), para, offset)
 					if candi.Empty() {
 						continue
 					}
@@ -534,8 +534,6 @@ func findMaxContainment(k1 KmerInfo, kiList KmerInfoList) KmerInfo {
 		return maxK2
 	}
 
-	// fmt.Fprintf(os.Stderr, "begin findMaxContainment, left size: %d\n", len(kiList))
-
 	// kiList sorted already
 	for _, k2 := range kiList {
 		if k2.IsEmpty() {
@@ -556,7 +554,7 @@ func findMaxContainment(k1 KmerInfo, kiList KmerInfoList) KmerInfo {
 		// fmt.Fprintf(os.Stderr, "maxJC: k1: %d, k2: %d, %.2f\n", k1.RecordSet.Cardinality(), k2.RecordSet.Cardinality(), jc)
 	}
 
-	return maxK2.Clone()
+	return maxK2
 }
 
 type KmerInfo struct {
