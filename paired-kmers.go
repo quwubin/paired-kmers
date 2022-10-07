@@ -138,7 +138,7 @@ func buildKmer(seq []byte, k int, p Para) *roaring64.Bitmap {
 }
 
 func JaccardContainment(a, b *roaring.Bitmap) uint64 {
-	if a == nil || b == nil {
+	if a.IsEmpty() || b.IsEmpty() {
 		return 0
 	}
 
@@ -335,7 +335,7 @@ func fincCandiRoads(fastaHash map[uint32]*fastx.Record, k1 KmerInfo, k2 KmerInfo
 	re2 := regexp.MustCompile(k2seq)
 	var candi PairedKmer
 
-	if k1.RecordSet == nil || k2.RecordSet == nil {
+	if k1.IsEmpty() || k2.IsEmpty() {
 		return candi
 	}
 
@@ -459,11 +459,7 @@ func findPairRoads(kiList KmerInfoList, fastaHash map[uint32]*fastx.Record, para
 		func() error {
 			defer close(inChan)
 
-			for i := 0; i < len(kiList); i++ {
-				if i == len(kiList)-1 {
-					break
-				}
-
+			for i := 0; i < len(kiList)-1; i++ {
 				k1 := kiList[i]
 
 				select {
@@ -486,11 +482,11 @@ func findPairRoads(kiList KmerInfoList, fastaHash map[uint32]*fastx.Record, para
 					t := t
 
 					k2 := findMaxContainment(t.K1, t.KI)
-					if k2.Empty() {
+					if k2.IsEmpty() {
 						continue
 					}
 
-					candi := fincCandiRoads(fastaHash, t.K1, k2, para, offset)
+					candi := fincCandiRoads(fastaHash, t.K1.Clone(), k2, para, offset)
 					if candi.Empty() {
 						continue
 					}
@@ -530,7 +526,7 @@ func findPairRoads(kiList KmerInfoList, fastaHash map[uint32]*fastx.Record, para
 func findMaxContainment(k1 KmerInfo, kiList KmerInfoList) KmerInfo {
 	maxJC := uint64(0)
 	var maxK2 KmerInfo
-	if k1.Empty() {
+	if k1.IsEmpty() {
 		return maxK2
 	}
 
@@ -542,7 +538,7 @@ func findMaxContainment(k1 KmerInfo, kiList KmerInfoList) KmerInfo {
 
 	// kiList sorted already
 	for _, k2 := range kiList {
-		if k2.Empty() {
+		if k2.IsEmpty() {
 			break
 		}
 
@@ -560,7 +556,7 @@ func findMaxContainment(k1 KmerInfo, kiList KmerInfoList) KmerInfo {
 		// fmt.Fprintf(os.Stderr, "maxJC: k1: %d, k2: %d, %.2f\n", k1.RecordSet.Cardinality(), k2.RecordSet.Cardinality(), jc)
 	}
 
-	return maxK2
+	return maxK2.Clone()
 }
 
 type KmerInfo struct {
@@ -568,8 +564,16 @@ type KmerInfo struct {
 	RecordSet *roaring.Bitmap
 }
 
-func (a *KmerInfo) Empty() bool {
-	if a == nil || a.RecordSet == nil || a.RecordSet.IsEmpty() {
+func (a *KmerInfo) Clone() KmerInfo {
+	var b KmerInfo
+	b.K = a.K
+	b.RecordSet = a.RecordSet.Clone()
+
+	return b
+}
+
+func (a *KmerInfo) IsEmpty() bool {
+	if a.K == 0 || a.RecordSet.IsEmpty() {
 		return true
 	}
 
