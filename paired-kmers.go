@@ -152,12 +152,43 @@ type recordInData struct {
 
 type recordOutData struct {
 	KmerSet roaring64.Bitmap
-	Record  *fastx.Record
 	Index   uint32
 }
 
+func statsInputDB(db string) (map[uint32]*fastx.Record, uint64, error) {
+	fastaHash := make(map[uint32]*fastx.Record)
+
+	reader, err := fastx.NewDefaultReader(db)
+	if err != nil {
+		return fastaHash, 0, err
+	}
+
+	size := uint64(0)
+
+	var record *fastx.Record
+	index := uint32(0)
+	for {
+		record, err = reader.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Println(err)
+			break
+		}
+
+		fastaHash[index] = record.Clone()
+		size += uint64(len(record.Seq.Seq))
+		index++
+	}
+
+	aveSize := uint64(float64(size) / float64(index))
+
+	return fastaHash, aveSize, nil
+}
+
 // kmer module
-func buildKmerInfo(db string, kvalue int, cpu int, p Para) (KmerInfoList, *roaring.Bitmap, map[uint32]*fastx.Record) {
+func buildKmerInfo(fastaHash map[uint32]*fastx.Record, kvalue int, cpu int, p Para) KmerInfoList {
 	g, ctx := errgroup.WithContext(context.Background())
 	inChan := make(chan recordInData)
 
@@ -165,34 +196,16 @@ func buildKmerInfo(db string, kvalue int, cpu int, p Para) (KmerInfoList, *roari
 		func() error {
 			defer close(inChan)
 
-			reader, err := fastx.NewDefaultReader(db)
-			if err != nil {
-				return err
-			}
-
-			var record *fastx.Record
-			index := uint32(0)
-			for {
-				record, err = reader.Read()
-				if err != nil {
-					if err == io.EOF {
-						break
-					}
-					log.Println(err)
-					break
-				}
-
+			for index, record := range fastaHash {
 				if p.Test {
 					fmt.Printf("record: %d\n", index)
 				}
 
 				select {
-				case inChan <- recordInData{Record: record.Clone(), Index: index}:
+				case inChan <- recordInData{Record: record, Index: index}:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
-
-				index++
 			}
 
 			return nil
@@ -215,7 +228,7 @@ func buildKmerInfo(db string, kvalue int, cpu int, p Para) (KmerInfoList, *roari
 					}
 
 					select {
-					case outChan <- recordOutData{KmerSet: *kmerSet, Record: t.Record, Index: t.Index}:
+					case outChan <- recordOutData{KmerSet: *kmerSet, Index: t.Index}:
 					case <-ctx.Done():
 						return ctx.Err()
 					}
@@ -231,17 +244,11 @@ func buildKmerInfo(db string, kvalue int, cpu int, p Para) (KmerInfoList, *roari
 		close(outChan)
 	}()
 
-	allRecords := roaring.New()
-	fastaHash := make(map[uint32]*fastx.Record)
-
 	kmerInfoMap := make(map[uint64]*roaring.Bitmap)
 
 	processed := 0
 	filteredKmerSet := roaring64.New()
 	for o := range outChan {
-		allRecords.Add(o.Index)
-		fastaHash[o.Index] = o.Record
-
 		ks := o.KmerSet.Iterator()
 		for ks.HasNext() {
 			code := ks.Next()
@@ -265,18 +272,20 @@ func buildKmerInfo(db string, kvalue int, cpu int, p Para) (KmerInfoList, *roari
 			exitErr(err)
 
 			// a temporary break
-			if p.ForceKmerCutoff && processed >= p.KmerEval || v.UsedPercent > p.Memory {
-				log.Printf("processed %d records, use these records's first %d kmers (sorted by hit records) for following analysis", processed, p.KmerEval)
-				kiList := sortKmerInfoList(kmerInfoMap)
-				if len(kiList) > p.KmerEval {
-					for i := 0; i < p.KmerEval; i++ {
-						filteredKmerSet.Add(kiList[i].K)
+			if processed >= p.RecordCutoff {
+				if p.ForceCutoff || v.UsedPercent >= p.Memory {
+					log.Printf("processed %d records, use these records's first %d kmers (sorted by hit records) for following analysis", processed, p.KmerCutoff)
+					kiList := sortKmerInfoList(kmerInfoMap)
+					if len(kiList) > p.KmerCutoff {
+						for i := 0; i < p.KmerCutoff; i++ {
+							filteredKmerSet.Add(kiList[i].K)
+						}
 					}
-				}
 
-				for code := range kmerInfoMap {
-					if !filteredKmerSet.Contains(code) {
-						delete(kmerInfoMap, code)
+					for code := range kmerInfoMap {
+						if !filteredKmerSet.Contains(code) {
+							delete(kmerInfoMap, code)
+						}
 					}
 				}
 			}
@@ -291,7 +300,7 @@ func buildKmerInfo(db string, kvalue int, cpu int, p Para) (KmerInfoList, *roari
 
 	if err := g.Wait(); err != nil {
 		log.Println(err)
-		return kiList, allRecords, fastaHash
+		return kiList
 	}
 
 	kiList = sortKmerInfoList(kmerInfoMap)
@@ -300,7 +309,7 @@ func buildKmerInfo(db string, kvalue int, cpu int, p Para) (KmerInfoList, *roari
 		delete(kmerInfoMap, k)
 	}
 
-	return kiList, allRecords, fastaHash
+	return kiList
 }
 
 func sortKmerInfoList(kmerInfoMap map[uint64]*roaring.Bitmap) KmerInfoList {
@@ -319,7 +328,7 @@ func sortKmerInfoList(kmerInfoMap map[uint64]*roaring.Bitmap) KmerInfoList {
 	return kiList
 }
 
-func fincCandiRoads(fastaHash map[uint32]*fastx.Record, k1 KmerInfo, k2 KmerInfo, para Para) PairedKmer {
+func fincCandiRoads(fastaHash map[uint32]*fastx.Record, k1 KmerInfo, k2 KmerInfo, para Para, offset int) PairedKmer {
 	k1seq := string(kmers.Decode(k1.K, para.Kvalue))
 	k2seq := string(kmers.Decode(k2.K, para.Kvalue))
 	re1 := regexp.MustCompile(k1seq)
@@ -394,6 +403,10 @@ func fincCandiRoads(fastaHash map[uint32]*fastx.Record, k1 KmerInfo, k2 KmerInfo
 
 					candi.Amp5 = recordSeq[candi.F5:candi.R5]
 					candi.Amp3 = recordSeq[candi.F3+1 : candi.R3]
+					candi.F5 += offset
+					candi.F3 += offset
+					candi.R5 += offset
+					candi.R3 += offset
 				}
 
 				if shared {
@@ -437,7 +450,7 @@ type kiData struct {
 	KI KmerInfoList
 }
 
-func findPairRoads(kiList KmerInfoList, fastaHash map[uint32]*fastx.Record, para Para) PairedKmers {
+func findPairRoads(kiList KmerInfoList, fastaHash map[uint32]*fastx.Record, para Para, offset int) PairedKmers {
 	g, ctx := errgroup.WithContext(context.Background())
 	inChan := make(chan kiData)
 	var roadList PairedKmers
@@ -477,7 +490,7 @@ func findPairRoads(kiList KmerInfoList, fastaHash map[uint32]*fastx.Record, para
 						continue
 					}
 
-					candi := fincCandiRoads(fastaHash, t.K1, k2, para)
+					candi := fincCandiRoads(fastaHash, t.K1, k2, para, offset)
 					if candi.Empty() {
 						continue
 					}
@@ -566,20 +579,23 @@ func (a *KmerInfo) Empty() bool {
 type KmerInfoList []KmerInfo
 
 type Para struct {
-	Out             string
-	Input           string
-	Kvalue          int
-	KmerEval        int
-	ForceKmerCutoff bool
-	Memory          float64
-	MinSize         int
-	MaxSize         int
-	CPU             int
-	MaxRun          int
-	MinGC           float64
-	MaxGC           float64
-	Force           bool
-	Test            bool
+	Out          string // output file name
+	OutputCutoff int    // output the maximum number of paired-kmers
+	Input        string // input virus/bacterial file in fasta format
+	Kvalue       int    // kmer size, default 17, usually, smaller value for virus and big value for bacterial
+	RecordCutoff int
+	KmerCutoff   int
+	ColumnSize   int
+	ForceCutoff  bool
+	Memory       float64
+	MinSize      int
+	MaxSize      int
+	CPU          int
+	MaxRun       int
+	MinGC        float64
+	MaxGC        float64
+	Force        bool
+	Test         bool
 }
 
 func outExists(out string) bool {
@@ -637,41 +653,101 @@ func searchPairedKmers(para Para) {
 		}
 	}
 
-	kiList, allRecords, fastaHash := buildKmerInfo(para.Input, int(para.Kvalue), para.CPU, para)
+	fastaHash, aveSize, err := statsInputDB(para.Input)
+	exitErr(err)
 
-	allRecordsSize := allRecords.GetCardinality()
+	columnCount := aveSize/uint64(para.ColumnSize) + 1
 
-	log.Printf("build kmer info done: %d records, %d kiList", allRecordsSize, len(kiList))
-	fmt.Fprintf(os.Stderr, "build kmer info done.\n")
+	totalRecordsCount := len(fastaHash)
 
-	fo, err := os.Create(para.Out)
+	var roadList PairedKmers
+	start := 0
+	stop := para.ColumnSize
+	for i := 1; i <= int(columnCount); i++ {
+		columnFastaHash := make(map[uint32]*fastx.Record, len(fastaHash))
+
+		for index, record := range fastaHash {
+			record = record.Clone()
+
+			recordSize := len(record.Seq.Seq)
+			if recordSize <= start {
+				continue
+			}
+
+			recordStop := stop
+
+			if recordSize <= recordStop {
+				recordStop = recordSize
+			}
+
+			record.Seq.Seq = record.Seq.Seq[start:recordStop]
+
+			columnFastaHash[index] = record
+		}
+
+		kiList := buildKmerInfo(columnFastaHash, int(para.Kvalue), para.CPU, para)
+
+		log.Printf("column: %d/%d, range: %d-%d, build kmer info done: %d records, %d kiList", i, columnCount, start, stop, totalRecordsCount, len(kiList))
+
+		subRoadList := findPairRoads(kiList, columnFastaHash, para, start)
+
+		log.Printf("column: %d/%d, range: %d-%d, found %d/%d sub-road list", i, columnCount, start, stop, len(subRoadList), len(roadList))
+
+		roadList = append(roadList, subRoadList...)
+
+		sort.Slice(roadList, func(i, j int) bool {
+			return roadList[i].Records.GetCardinality() > roadList[j].Records.GetCardinality()
+		})
+
+		if len(roadList) > para.OutputCutoff {
+			roadList = roadList[:para.OutputCutoff]
+		}
+
+		start = stop
+		stop += para.ColumnSize
+	}
+
+	sort.Slice(roadList, func(i, j int) bool {
+		return roadList[i].Records.GetCardinality() > roadList[j].Records.GetCardinality()
+	})
+
+	printOut(roadList, para, fastaHash)
+
+	log.Printf("Total time used: %s", time.Since(startTime).String())
+}
+
+func printOut(roadList PairedKmers, p Para, fastaHash map[uint32]*fastx.Record) {
+	fo, err := os.Create(p.Out)
 	checkErr(err)
 	defer fo.Close()
 
-	fmid, err := os.Create(para.Out + ".mid.bed")
+	fmid, err := os.Create(p.Out + ".mid.bed")
 	checkErr(err)
 	defer fmid.Close()
 
 	fmt.Fprintf(fo, "# %s\n", strings.Join(os.Args, " "))
 	fmt.Fprintln(fo, "# inner position")
 
-	roadList := findPairRoads(kiList, fastaHash, para)
+	totalRecordsCount := len(fastaHash)
+
 	for _, road := range roadList {
-		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\t%s\t%s\n", fastaHash[road.Index].ID, road.F3, road.R3, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(allRecordsSize)*100, road.K1, road.K2)
+		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\t%s\t%s\n", fastaHash[road.Index].ID, road.F3, road.R3, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(totalRecordsCount)*100, road.K1, road.K2)
 
 		mid := int((road.F3 + road.R3) / 2)
-		fmt.Fprintf(fmid, "%s\t%d\t%d\t%d\t%.2f\n", fastaHash[road.Index].ID, mid, mid+1, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(allRecordsSize)*100)
+		fmt.Fprintf(fmid, "%s\t%d\t%d\t%d\t%.2f\n", fastaHash[road.Index].ID, mid, mid+1, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(totalRecordsCount)*100)
 	}
 
-	log.Printf("Total time used: %s", time.Since(startTime).String())
 }
 
 func main() {
 	var input *string = flag.StringP("in", "i", "", "[*] input virus/bacterial file in fasta format")
 	var out *string = flag.StringP("out", "o", "", "output file")
+	var outputCutoff *int = flag.Int("outputCutoff", 1000, "output the maximum number of paired-kmers")
 	var kvalue *int = flag.IntP("kvalue", "k", 17, "k value")
-	var kmerEval *int = flag.IntP("kmerEval", "n", 10000, "the first n kmers (sorted by hit records) for next evaluation")
-	var forceKmerCutoff *bool = flag.BoolP("forceKmerCutoff", "F", false, "force to use --kmerEval for kmers cutoff even the memory usage is below the threshold")
+	var recordCutoff *int = flag.Int("recordCutoff", 100, "the minimum records to be used to sort kmers, if memory is below of the threshold, this limit won't work. Add -F to force use this cutoff.")
+	var kmerCutoff *int = flag.IntP("kmerCutoff", "n", 10000, "the first n kmers (sorted by hit records) for next evaluation, if memory is below of the threshold, this limit won't work. Add -F to force use this cutoff.")
+	var columnSize *int = flag.Int("columnSize", 100000, "max column size for large size of genome")
+	var forceCutoff *bool = flag.BoolP("forceCutoff", "F", false, "force to use --kmerCutoff for kmer/record cutoff even the memory usage is below the threshold")
 	var memory *float64 = flag.Float64P("memory", "m", 70, "memory percent to use, e.g., 70 for 70%")
 	var minSize *int = flag.IntP("minSize", "s", 60, "min distance between the two paired-kmers")
 	var maxSize *int = flag.IntP("maxSize", "S", 130, "max distance between the two paired-kmers")
@@ -703,24 +779,27 @@ func main() {
 	}
 
 	p := Para{
-		Input:           *input,
-		Out:             *out,
-		Kvalue:          *kvalue,
-		KmerEval:        *kmerEval,
-		ForceKmerCutoff: *forceKmerCutoff,
-		Memory:          *memory,
-		MinSize:         *minSize,
-		MaxSize:         *maxSize,
-		CPU:             *cpu,
-		MaxRun:          *maxRun,
-		MinGC:           *minGC,
-		MaxGC:           *maxGC,
-		Force:           *force,
-		Test:            *test,
+		Input:        *input,
+		Out:          *out,
+		OutputCutoff: *outputCutoff,
+		Kvalue:       *kvalue,
+		RecordCutoff: *recordCutoff,
+		KmerCutoff:   *kmerCutoff,
+		ColumnSize:   *columnSize,
+		ForceCutoff:  *forceCutoff,
+		Memory:       *memory,
+		MinSize:      *minSize,
+		MaxSize:      *maxSize,
+		CPU:          *cpu,
+		MaxRun:       *maxRun,
+		MinGC:        *minGC,
+		MaxGC:        *maxGC,
+		Force:        *force,
+		Test:         *test,
 	}
 
-	if p.ForceKmerCutoff {
-		if p.KmerEval < 0 {
+	if p.ForceCutoff {
+		if p.KmerCutoff < 0 {
 			fmt.Fprintln(os.Stderr, "-F requires a positive kmer cutoff for -n parameters")
 			return
 		}
