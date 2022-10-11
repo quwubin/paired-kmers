@@ -292,7 +292,7 @@ func buildKmerInfo(fastaHash map[uint32]*fastx.Record, kvalue int, cpu int, p Pa
 		}
 
 		if p.Test {
-			fmt.Printf("processed: %d, o.KmerSet: %d, kmerInfoMap size: %d\n", processed, o.KmerSet.GetCardinality(), len(kmerInfoMap))
+			log.Printf("processed: %d, o.KmerSet: %d, kmerInfoMap size: %d\n", processed, o.KmerSet.GetCardinality(), len(kmerInfoMap))
 		}
 	}
 
@@ -545,7 +545,7 @@ func findMaxContainment(k1 KmerInfo, kiList KmerInfoList) KmerInfo {
 			return maxK2
 		}
 
-		jc := JaccardContainment(k1.RecordSet, k2.RecordSet)
+		jc := k1.RecordSet.AndCardinality(k2.RecordSet)
 		if jc > maxJC {
 			maxJC = jc
 			maxK2 = k2
@@ -765,7 +765,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n\n", os.Args[0])
 
 		fmt.Fprintln(os.Stderr, "./paired-kmer -i sars2.fa -o sars2.paired-kmer.bed -k 17 -s 60 -S 130")
-
 		fmt.Fprintln(os.Stderr)
 
 		flag.PrintDefaults()
