@@ -733,10 +733,22 @@ func printOut(roadList PairedKmers, p Para, fastaHash map[uint32]*fastx.Record) 
 	totalRecordsCount := len(fastaHash)
 
 	for _, road := range roadList {
-		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\t%s\t%s\n", fastaHash[road.Index].ID, road.F3, road.R3, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(totalRecordsCount)*100, road.K1, road.K2)
+		recordNameList := make([]string, road.Records.GetCardinality())
+		recordIter := road.Records.Iterator()
+		i := 0
+		for recordIter.HasNext() {
+			recordIndex := recordIter.Next()
+			recordName := fastaHash[recordIndex].ID
+			recordNameList[i] = string(recordName)
+			i++
+		}
+
+		recordNameStr := strings.Join(recordNameList, " ")
+
+		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\t%s\t%s\t%s\n", fastaHash[road.Index].ID, road.F3, road.R3, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(totalRecordsCount)*100, road.K1, road.K2, recordNameStr)
 
 		mid := int((road.F3 + road.R3) / 2)
-		fmt.Fprintf(fmid, "%s\t%d\t%d\t%d\t%.2f\n", fastaHash[road.Index].ID, mid, mid+1, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(totalRecordsCount)*100)
+		fmt.Fprintf(fmid, "%s\t%d\t%d\t%d\t%.2f\t%s\n", fastaHash[road.Index].ID, mid, mid+1, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(totalRecordsCount)*100, recordNameStr)
 	}
 
 }
