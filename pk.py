@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-for paired-kmers
+generate random data for testing paired-kmers
 
 requires Python version >= 3.10 and NumPy
 
