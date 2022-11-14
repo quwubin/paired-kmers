@@ -37,7 +37,12 @@ We compare sequences to find the conserved regions, so we recommend:
 
 https://github.com/quwubin/paired-kmers/issues
 
+## Cite us
+
+Manuscript is submitted.
+
 ## Contact
 
 Wubin Qu (<quwubin@gmail.com>)
+
 Haoyang Cai (<haoyang.cai@scu.edu.cn>)
