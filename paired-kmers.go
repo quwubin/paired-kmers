@@ -782,7 +782,7 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s (%s):\n\n", os.Args[0], version)
 
-		fmt.Fprintln(os.Stderr, "./paired-kmer -i hpv16.fa -o hpv16.paired_kmer.bed -k 17 -s 90 -S 300")
+		fmt.Fprintln(os.Stderr, "./paired-kmers -i hpv16.fa -o hpv16.paired_kmer.bed -k 17 -s 90 -S 300")
 		fmt.Fprintln(os.Stderr)
 
 		flag.PrintDefaults()
