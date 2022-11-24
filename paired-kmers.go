@@ -28,6 +28,8 @@ import (
 	flag "github.com/spf13/pflag"
 )
 
+var version = "1.0.0"
+
 func checkErr(err error) {
 	if err != nil {
 		log.Fatal(err)
@@ -729,6 +731,10 @@ func printOut(roadList PairedKmers, p Para, fastaHash map[uint32]*fastx.Record) 
 
 	fmt.Fprintf(fo, "# %s\n", strings.Join(os.Args, " "))
 	fmt.Fprintln(fo, "# inner position")
+	fmt.Fprintf(fmid, "# %s\n", strings.Join(os.Args, " "))
+	fmt.Fprintln(fmid, "# inner position")
+	fmt.Fprintln(fo, "# chr\tinnerStart\tinnerEnd\thitNumber\thitPercent(%)\tleftKmer\trightKmer\thitRecords")
+	fmt.Fprintln(fmid, "# chr\tinnerStart\tinnerEnd\thitNumber\thitPercent(%)\thitRecords")
 
 	totalRecordsCount := len(fastaHash)
 
@@ -774,12 +780,17 @@ func main() {
 	var help *bool = flag.BoolP("help", "h", false, "print this message")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage of %s:\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage of %s (%s):\n\n", os.Args[0], version)
 
-		fmt.Fprintln(os.Stderr, "./paired-kmer -i sars2.fa -o sars2.paired-kmer.bed -k 17 -s 60 -S 130")
+		fmt.Fprintln(os.Stderr, "./paired-kmer -i hpv16.fa -o hpv16.paired_kmer.bed -k 17 -s 90 -S 300")
 		fmt.Fprintln(os.Stderr)
 
 		flag.PrintDefaults()
+
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "Bugs here: https://github.com/quwubin/paired-kmers")
+		fmt.Fprintln(os.Stderr, "Contact Wubin Qu (quwubin@gmail.com) for questions or comments.")
 	}
 
 	flag.CommandLine.SortFlags = false
