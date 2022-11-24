@@ -81,8 +81,9 @@ JN565303.1      512     767     506     100.00  TGGACCGGTCGATGTAT       CTACGTGT
 ### Author notes about the output
 
 1. Hit number and hit percent means that from the region we can find primers who will amplify the corresponding hit targets. 
-2. Primers should selected around the region. If we have primer design workflow, I suggest that pick and check primers from the middle point of the region (also provided by file file suffix ".mid.bed").
-3. Paired-kmers has options for limiting kmers with proper GC content and skipping repeated nucleotides. However, these options are used for reducting kmers to control memory when finding conserved regions in some very large genome database. So, the output should not used directly as primers, even they are paired. Good primers should also be checked for dimers, non-specificity etc. My previous work MFEprimer (http://academic.oup.com/nar/article/47/W1/W610/5486745) is designed for primers quality check if you need.
+2. Primers should selected around the region. If we have primer design workflow, I suggest that pick and check primers from the middle point of the region (also provided by file suffix ".mid.bed").
+3. For conserved species, we can use a big k value, e.g., `-k 30`; and a small k value, e.g., `-k 16` for less conserved species.
+4. Paired-kmers has options for limiting kmers with proper GC content and skipping repeated nucleotides. However, these options are used for reducting kmers to control memory when finding conserved regions in some very large genome database. So, the output should not used directly as primers, even they are paired. Good primers should also be checked for dimers, non-specificity etc. My previous work MFEprimer (http://academic.oup.com/nar/article/47/W1/W610/5486745) is designed for primers quality check if you need.
 
 
 ### Note about genome sequences
