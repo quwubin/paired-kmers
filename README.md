@@ -30,9 +30,9 @@ tar zxvf paired-kmer-xxx-amd64.tar.bz
 There are two output files, one is "hpv16.paired_kmer.bed", and the other is "hpv16.paired_kmer.bed.mid.bed".
 
 For each file, each row is a conserved region represented by one chrosome location. There are 8 columns in file "hpv16.paired_kmer.bed".
-1. The first column is the represented chromosome;
-2. The second column is the inner position (3' end) of left kmer;
-3. The third column is the inner position (5' end) of right kmer;
+1. The 1st column is the represented chromosome;
+2. The 2nd column is the inner position (3' end) of left kmer;
+3. The 3rd column is the inner position (5' end) of right kmer;
 4. The 4th column is the number of covered records of this conserved paired-kmer;
 5. The 5th column is the records covered percent of this conserved paired-kmer;
 6. The 6th is the left kmer sequence;
@@ -77,6 +77,13 @@ JN565303.1      3203    3375    506     100.00  GACATATGCAATACAAT       CCTGACCA
 JN565303.1      2484    2577    506     100.00  CATAGACCATTGGTACA       TACCTATTTTGGCATCT       JN565303.1 KY549224.1 KY549225.1 JQ004093.1 JN565302.1 JQ067943.1 JQ067944.1 KY549166.1 KY549200.1 KY549211.
 JN565303.1      512     767     506     100.00  TGGACCGGTCGATGTAT       CTACGTGTGTGCTTTGT       JN565303.1 KY549224.1 KY549225.1 JQ004093.1 JN565302.1 JQ067943.1 JQ067944.1 KY549166.1 KY549200.1 KY549211.
 ```
+
+### Author notes about the output
+
+1. Hit number and hit percent means that from the region we can find primers who will amplify the corresponding hit targets. 
+2. Primers should selected around the region. If we have primer design workflow, I suggest that pick and check primers from the middle point of the region (also provided by file file suffix ".mid.bed").
+3. Paired-kmers has options for limiting kmers with proper GC content and skipping repeated nucleotides. However, these options are used for reducting kmers to control memory when finding conserved regions in some very large genome database. So, the output should not used directly as primers, even they are paired. Good primers should also be checked for dimers, non-specificity etc. My previous work MFEprimer (http://academic.oup.com/nar/article/47/W1/W610/5486745) is designed for primers quality check if you need.
+
 
 ### Note about genome sequences
 
