@@ -21,14 +21,13 @@ import (
 	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/neilotoole/errgroup"
-	"github.com/shenwei356/bio/seq"
 	"github.com/shenwei356/bio/seqio/fastx"
 	"github.com/shenwei356/kmers"
 	"github.com/shirou/gopsutil/mem"
 	flag "github.com/spf13/pflag"
 )
 
-var version = "1.0.0"
+var version = "1.0.1"
 
 func checkErr(err error) {
 	if err != nil {
@@ -366,12 +365,17 @@ func fincCandiRoads(fastaHash map[uint32]*fastx.Record, k1 KmerInfo, k2 KmerInfo
 
 			for _, p2 := range k2PosList {
 				var f, r []int
+				var fSeq, rSeq string
 				if p1[0] < p2[0] {
 					f = p1
 					r = p2
+					fSeq = k1seq
+					rSeq = k2seq
 				} else {
 					f = p2
 					r = p1
+					fSeq = k2seq
+					rSeq = k1seq
 				}
 
 				dist := r[0] - f[0] - int(para.Kvalue)
@@ -387,20 +391,20 @@ func fincCandiRoads(fastaHash map[uint32]*fastx.Record, k1 KmerInfo, k2 KmerInfo
 				shared = true
 
 				if candi.Empty() {
-					k2seq, err := seq.NewSeq(seq.DNA, []byte(k2seq))
-					if err != nil {
-						log.Println(err)
-						continue
-					}
+					// k2seq, err := seq.NewSeq(seq.DNA, []byte(k2seq))
+					// if err != nil {
+					// 	log.Println(err)
+					// 	continue
+					// }
 
 					candi = PairedKmer{
 						Index: recordIndex,
-						K1:    k1seq,
-						K2:    string(k2seq.RevCom().Seq),
 						F5:    f[0],     // 包含
 						F3:    f[1] - 1, // 包含
 						R5:    r[1],     // 不包含
 						R3:    r[0],     // 包含
+						Fseq:  fSeq,
+						Rseq:  rSeq,
 					}
 
 					candi.Amp5 = recordSeq[candi.F5:candi.R5]
@@ -429,8 +433,8 @@ func fincCandiRoads(fastaHash map[uint32]*fastx.Record, k1 KmerInfo, k2 KmerInfo
 
 type PairedKmer struct {
 	Index   uint32 // record index
-	K1      string
-	K2      string
+	Fseq    string
+	Rseq    string
 	Dist    int
 	F5      int
 	F3      int
@@ -442,7 +446,7 @@ type PairedKmer struct {
 }
 
 func (a *PairedKmer) Empty() bool {
-	return a.K1 == ""
+	return a.Fseq == ""
 }
 
 type PairedKmers []PairedKmer
@@ -733,8 +737,8 @@ func printOut(roadList PairedKmers, p Para, fastaHash map[uint32]*fastx.Record) 
 	fmt.Fprintln(fo, "# inner position")
 	fmt.Fprintf(fmid, "# %s\n", strings.Join(os.Args, " "))
 	fmt.Fprintln(fmid, "# inner position")
-	fmt.Fprintln(fo, "# chr\tinnerStart\tinnerEnd\thitNumber\thitPercent(%)\tleftKmer\trightKmer\thitRecords")
-	fmt.Fprintln(fmid, "# chr\tinnerStart\tinnerEnd\thitNumber\thitPercent(%)\thitRecords")
+	fmt.Fprintln(fo, "# chr\tinnerStart\tinnerEnd\thitNumber\thitPercent(%)\tleftKmer\trightKmer\twholeSeq\twholeSize\thitRecords")
+	fmt.Fprintln(fmid, "# chr\tinnerMidStart\tinnerMidEnd\thitNumber\thitPercent(%)\thitRecords")
 
 	totalRecordsCount := len(fastaHash)
 
@@ -751,7 +755,7 @@ func printOut(roadList PairedKmers, p Para, fastaHash map[uint32]*fastx.Record) 
 
 		recordNameStr := strings.Join(recordNameList, " ")
 
-		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\t%s\t%s\t%s\n", fastaHash[road.Index].ID, road.F3, road.R3, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(totalRecordsCount)*100, road.K1, road.K2, recordNameStr)
+		fmt.Fprintf(fo, "%s\t%d\t%d\t%d\t%.2f\t%s\t%s\t%s\t%d\t%s\n", fastaHash[road.Index].ID, road.F3, road.R3, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(totalRecordsCount)*100, road.Fseq, road.Rseq, road.Amp5, len(road.Amp5), recordNameStr)
 
 		mid := int((road.F3 + road.R3) / 2)
 		fmt.Fprintf(fmid, "%s\t%d\t%d\t%d\t%.2f\t%s\n", fastaHash[road.Index].ID, mid, mid+1, road.Records.GetCardinality(), float64(road.Records.GetCardinality())/float64(totalRecordsCount)*100, recordNameStr)
