@@ -772,7 +772,7 @@ func main() {
 	var kmerCutoff *int = flag.IntP("kmerCutoff", "n", 10000, "the first n kmers (sorted by hit records) for next evaluation, if memory is below of the threshold, this limit won't work. Add -F to force use this cutoff.")
 	var columnSize *int = flag.Int("columnSize", 100000, "max column size for large size of genome")
 	var forceCutoff *bool = flag.BoolP("forceCutoff", "F", false, "force to use --kmerCutoff for kmer/record cutoff even the memory usage is below the threshold")
-	var memory *float64 = flag.Float64P("memory", "m", 70, "memory percent to use, e.g., 70 for 70%")
+	var memory *float64 = flag.Float64P("memory", "m", 50, "memory percent to use, e.g., 70 for 70%")
 	var minSize *int = flag.IntP("minSize", "s", 60, "min distance between the two paired-kmers")
 	var maxSize *int = flag.IntP("maxSize", "S", 130, "max distance between the two paired-kmers")
 	var cpu *int = flag.IntP("cpu", "c", 64, "CPU number to use")
