@@ -2,7 +2,7 @@
 
 ## Introduction
 
-It is a challenge to identify long enough conserved regions for PCR primer design in highly diverse genomes, such as virus and bacteria. Both multiple sequence alignment and k-mer based alignment free methods are utilized for the task. However, with more and more genome sequences are available, the computational and computer memory requirements are stll the bottleneck.
+It is a challenge to identify long enough conserved regions for PCR primer design in highly diverse genomes, such as virus and bacteria. Both multiple sequence alignment and k-mer based alignment free methods are utilized for the task. However, with more and more genome sequences are available, the computational and computer memory requirements are still the bottleneck.
 
 Here, we propose a fast and memory-efficient k-mer based method, which we named Paired-Kmers, to identify two regions that are close to each other but not necessarily contiguous for picking primers. Importantly, we implemented column-based and row-based reduction methods to overcome memory bottleneck when analyzing species with large genome sizes and species with millions of different strains. 
 
