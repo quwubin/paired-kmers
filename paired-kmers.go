@@ -199,7 +199,7 @@ func buildKmerInfo(fastaHash map[uint32]*fastx.Record, kvalue int, cpu int, p Pa
 
 			for index, record := range fastaHash {
 				if p.Test {
-					fmt.Printf("record: %d\n", index)
+					log.Printf("inChan record: %d\n", index)
 				}
 
 				select {
@@ -225,7 +225,7 @@ func buildKmerInfo(fastaHash map[uint32]*fastx.Record, kvalue int, cpu int, p Pa
 					kmerSet := buildKmer(seq, kvalue, p)
 
 					if p.Test {
-						fmt.Printf("record: %d, kmer: %d\n", t.Index, kmerSet.GetCardinality())
+						log.Printf("record: %d, kmer: %d\n", t.Index, kmerSet.GetCardinality())
 					}
 
 					select {
@@ -250,6 +250,7 @@ func buildKmerInfo(fastaHash map[uint32]*fastx.Record, kvalue int, cpu int, p Pa
 	processed := 0
 	filteredKmerSet := roaring64.New()
 	for o := range outChan {
+		log.Printf("outChan, record index: %d", o.Index)
 		ks := o.KmerSet.Iterator()
 		for ks.HasNext() {
 			code := ks.Next()
@@ -668,14 +669,18 @@ func searchPairedKmers(para Para) {
 
 	totalRecordsCount := len(fastaHash)
 
+	log.Printf("totalRecordsCount: %d, columnCount: %d", totalRecordsCount, columnCount)
+
 	var roadList PairedKmers
 	start := 0
 	stop := para.ColumnSize
 	for i := 1; i <= int(columnCount); i++ {
+		log.Printf("column: %d/%d, range: %d-%d", i, columnCount, start, stop)
+
 		columnFastaHash := make(map[uint32]*fastx.Record, len(fastaHash))
 
 		for index, record := range fastaHash {
-			record = record.Clone()
+			record := record.Clone()
 
 			recordSize := len(record.Seq.Seq)
 			if recordSize <= start {
@@ -692,6 +697,8 @@ func searchPairedKmers(para Para) {
 
 			columnFastaHash[index] = record
 		}
+
+		log.Printf("columnFastaHash: %d", len(columnFastaHash))
 
 		kiList := buildKmerInfo(columnFastaHash, int(para.Kvalue), para.CPU, para)
 
