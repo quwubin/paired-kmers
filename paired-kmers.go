@@ -782,7 +782,7 @@ func main() {
 	var memory *float64 = flag.Float64P("memory", "m", 50, "memory percent to use, e.g., 70 for 70%")
 	var minSize *int = flag.IntP("minSize", "s", 60, "min distance between the two paired-kmers")
 	var maxSize *int = flag.IntP("maxSize", "S", 130, "max distance between the two paired-kmers")
-	var cpu *int = flag.IntP("cpu", "c", 64, "CPU number to use")
+	var cpu *int = flag.IntP("cpu", "c", 1, "CPU number to use")
 	var maxRun *int = flag.Int("maxRun", 5, "runs are repeated nucleotides (e.g. TAAAAAGC has a 5 bp run of Adenine)")
 	var minGC *float64 = flag.Float64P("minGC", "g", 25.0, "max gc allowed for each kmer")
 	var maxGC *float64 = flag.Float64P("maxGC", "G", 75.0, "min gc allowed for each kmer")
