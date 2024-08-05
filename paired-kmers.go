@@ -840,6 +840,11 @@ func main() {
 		}
 	}
 
+	if p.CPU > runtime.NumCPU() {
+		fmt.Fprintf(os.Stderr, "CPU number %d is too large, set to %d\n", p.CPU, runtime.NumCPU())
+		p.CPU = runtime.NumCPU()
+	}
+
 	runtime.GOMAXPROCS(p.CPU)
 
 	searchPairedKmers(p)
