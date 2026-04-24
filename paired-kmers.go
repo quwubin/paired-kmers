@@ -248,6 +248,9 @@ func buildKmerInfo(fastaHash map[uint32]*fastx.Record, kvalue int, cpu int, p Pa
 	kmerInfoMap := make(map[uint64]*roaring.Bitmap)
 
 	processed := 0
+	// NOTE: filteredKmerSet is accessed only by the main goroutine (consumer).
+	// Worker goroutines must NOT touch it. If future refactoring moves any
+	// access into workers, add proper synchronization (e.g. sync.RWMutex).
 	filteredKmerSet := roaring64.New()
 	for o := range outChan {
 		log.Printf("outChan, record index: %d", o.Index)
@@ -330,7 +333,7 @@ func sortKmerInfoList(kmerInfoMap map[uint64]*roaring.Bitmap) KmerInfoList {
 	return kiList
 }
 
-func fincCandiRoads(fastaHash map[uint32]*fastx.Record, k1 KmerInfo, k2 KmerInfo, para Para, offset int) PairedKmer {
+func findCandiRoads(fastaHash map[uint32]*fastx.Record, k1 KmerInfo, k2 KmerInfo, para Para, offset int) PairedKmer {
 	k1seq := string(kmers.Decode(k1.K, para.Kvalue))
 	k2seq := string(kmers.Decode(k2.K, para.Kvalue))
 	re1 := regexp.MustCompile(k1seq)
@@ -493,7 +496,7 @@ func findPairRoads(kiList KmerInfoList, fastaHash map[uint32]*fastx.Record, para
 						continue
 					}
 
-					candi := fincCandiRoads(fastaHash, t.K1.Clone(), k2.Clone(), para, offset)
+					candi := findCandiRoads(fastaHash, t.K1.Clone(), k2.Clone(), para, offset)
 					if candi.Empty() {
 						continue
 					}
