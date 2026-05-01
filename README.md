@@ -1,5 +1,10 @@
 # Paired-Kmers: finding conserved regions in highly diverse genomes
 
+
+**Author:** Wubin Qu <wubin.qu@igenetech.com>  
+**Since:** 2015  
+**License:** Copyright © 2015-2026. iGeneTech Bioscience Co., Ltd. All Rights Reserved.
+
 ## Introduction
 
 It is a challenge to identify long enough conserved regions for PCR primer design in highly diverse genomes, such as virus and bacteria. Both multiple sequence alignment and k-mer based alignment free methods are utilized for the task. However, with more and more genome sequences are available, the computational and computer memory requirements are still the bottleneck.
@@ -17,7 +22,6 @@ tar zxvf paired-kmer-xxx-amd64.tar.bz
 
 ./paired-kmers -h
 ```
-
 
 ## Usage
 
@@ -66,7 +70,6 @@ JN565303.1	2753	2841	506	100.00	TTAATGATAAGAACTGG	AAATGTGTGTCAGGACA	TTAATGATAAGA
 2. Primers should selected around the region. If we have primer design workflow, I suggest that pick and check primers from the middle point of the region (also provided by file suffix ".mid.bed").
 3. For conserved species, we can use a big k value, e.g., `-k 30`; and a small k value, e.g., `-k 16` for less conserved species.
 4. Paired-kmers has options for limiting kmers with proper GC content and skipping repeated nucleotides. However, these options are used for reducting kmers to control memory when finding conserved regions in some very large genome database. So, the output should not used directly as primers, even they are paired. Good primers should also be checked for dimers, non-specificity etc. My previous work MFEprimer (http://academic.oup.com/nar/article/47/W1/W610/5486745) is designed for primers quality check if you need.
-
 
 ### Note about genome sequences
 
